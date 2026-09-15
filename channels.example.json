@@ -1,0 +1,24 @@
+[
+  {
+    "name": "Example channel with a role ping",
+    "youtubeChannelId": "UCXuqSBlHAE6Xw-yeJA0Tunw",
+    "discordChannelId": "123456789012345678",
+    "pingRole": "123456789012345678",
+    "message": [
+      "Hey {role},",
+      "{channel} just posted a video! Go check it out.",
+      "",
+      "{link}"
+    ]
+  },
+  {
+    "name": "Example channel without a ping",
+    "youtubeChannelId": "UCxxxxxxxxxxxxxxxxxxxxxx",
+    "discordChannelId": "123456789012345678",
+    "message": [
+      "{channel} just uploaded a new video!",
+      "{title}",
+      "{link}"
+    ]
+  }
+]

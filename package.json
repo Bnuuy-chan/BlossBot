@@ -1,0 +1,18 @@
+{
+  "name": "upload-announcer-bot",
+  "version": "1.0.0",
+  "description": "Discord bot that announces new YouTube uploads in a channel",
+  "private": true,
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "discord.js": "^14.27.0",
+    "dotenv": "^17.4.2",
+    "fast-xml-parser": "^5.11.1"
+  }
+}
