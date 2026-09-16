@@ -8,6 +8,7 @@ A Discord bot that watches one or more YouTube channels and posts a custom messa
 - The first time it sees a channel it remembers the videos that already exist and announces nothing. After that, anything new gets posted.
 - Announced video IDs are saved in `data/state.json`, so restarts never re-announce old videos.
 - Each watched channel has its own Discord channel, optional role ping, and message template.
+- Shorts and live streams are skipped unless you switch them on per channel. Scheduled premieres are announced once they start.
 - Discord turns the posted link into a preview with the thumbnail automatically.
 
 ## Commands
@@ -57,6 +58,8 @@ You should see `Logged in as ...`, the registered commands, a permissions check 
 | `discordChannelId` | yes | Discord channel that receives the announcements. |
 | `pingRole` | no | Role ID to ping, or `everyone` / `here`. Leave out for no ping. |
 | `message` | yes | The message to post, either one string or a list of lines. |
+| `announceShorts` | no | `true` to announce Shorts too. Default `false`. |
+| `announceLives` | no | `true` to announce live streams too. Default `false`. |
 
 Placeholders you can use in `message`:
 
@@ -71,6 +74,15 @@ To find a YouTube channel ID: open the channel page, click **About** (or the "mo
 
 The bot reads `channels.json` at startup, so restart it after changing the file.
 
+## What gets announced
+
+YouTube's feed lists everything a channel publishes, so before posting the bot looks up each new video:
+
+- Normal uploads are announced. A scheduled premiere is announced once it starts.
+- Shorts are skipped unless the entry has `"announceShorts": true`.
+- Live streams (upcoming, live now, or finished) are skipped unless the entry has `"announceLives": true`.
+- If YouTube cannot be read to tell what a video is, the bot retries on the next two checks and then announces it anyway, so a broken check can never silently mute the bot.
+
 ## Channel permissions
 
 The bot needs **View Channel**, **Send Messages** and **Embed Links** in every announcement channel. If a channel is private, add the bot (or its role) in the channel's settings under Permissions and allow those. To ping `everyone` / `here`, or a role that is not set to "allow anyone to mention", it also needs **Mention @everyone, @here and All Roles**.
@@ -80,7 +92,7 @@ The bot checks all of this every time it starts and logs a warning naming anythi
 ## Hosting on PebbleHost (or any panel host)
 
 1. Upload everything except `node_modules/` and `data/`. Include your filled-in `.env` and `channels.json`.
-2. Set the startup file to `src/index.js` and pick Node.js 18 or newer.
+2. Set the startup file to `index.js` and pick Node.js 18 or newer.
 3. Make sure the panel installs packages (`npm install`) on first start. If it does not, run it once from the panel console.
 4. Turn on the panel's crash detection / auto restart. The bot exits with a failure code on any unrecoverable error on purpose, so the host restarts it.
 
@@ -111,7 +123,9 @@ src/
   storage.js          remembers announced videos per channel in data/state.json
   commands/           one file per slash command
   youtube/feed.js     fetches and parses a YouTube RSS feed
+  youtube/classify.js tells normal uploads apart from Shorts and live streams
   youtube/poller.js   checks every watched channel on a timer and posts new videos
+index.js              start file the host runs; it just loads src/index.js
 channels.example.json example watch list (copy to channels.json)
 .env.example          example secrets file (copy to .env)
 ```

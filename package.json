@@ -3,9 +3,9 @@
   "version": "1.0.0",
   "description": "Discord bot that announces new YouTube uploads in a channel",
   "private": true,
-  "main": "src/index.js",
+  "main": "index.js",
   "scripts": {
-    "start": "node src/index.js"
+    "start": "node index.js"
   },
   "engines": {
     "node": ">=18.0.0"

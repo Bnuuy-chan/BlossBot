@@ -80,6 +80,13 @@ function loadChannels() {
       throw new Error(`${where}: pingRole must be a role ID, "everyone", "here", or left out.`);
     }
 
+    // Shorts and live streams are skipped unless switched on for this channel.
+    for (const flag of ['announceShorts', 'announceLives']) {
+      if (entry[flag] !== undefined && typeof entry[flag] !== 'boolean') {
+        throw new Error(`${where}: ${flag} must be true or false.`);
+      }
+    }
+
     // The message can be one string or a list of lines (easier to read in JSON).
     const message = (Array.isArray(entry.message) ? entry.message.join('\n') : String(entry.message || '')).trim();
     if (!message) {
@@ -98,7 +105,15 @@ function loadChannels() {
       log.warn(`${where}: the message has no {link}, so people will not be able to click through to the video.`);
     }
 
-    return { name, youtubeChannelId, discordChannelId, pingRole, message };
+    return {
+      name,
+      youtubeChannelId,
+      discordChannelId,
+      pingRole,
+      message,
+      announceShorts: entry.announceShorts === true,
+      announceLives: entry.announceLives === true,
+    };
   });
 }
 
