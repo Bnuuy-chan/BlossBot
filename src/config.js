@@ -40,6 +40,27 @@ function readChannelsFile() {
   }
 }
 
+// A message template can be one string or a list of lines (easier to read in JSON).
+// Returns the tidy text, or '' when the field is missing. Warns about likely mistakes.
+function parseTemplate(value, where, field, pingRole) {
+  if (value === undefined || value === null) return '';
+  const text = (Array.isArray(value) ? value.join('\n') : String(value)).trim();
+  if (!text) return '';
+
+  for (const placeholder of text.match(/\{\w+\}/g) || []) {
+    if (!KNOWN_PLACEHOLDERS.includes(placeholder)) {
+      log.warn(`${where}: "${placeholder}" in ${field} is not a known placeholder and will be posted as-is. Known: ${KNOWN_PLACEHOLDERS.join(' ')}`);
+    }
+  }
+  if (text.includes('{role}') && !pingRole) {
+    log.warn(`${where}: ${field} uses {role} but no pingRole is set, so it will be blank.`);
+  }
+  if (!text.includes('{link}')) {
+    log.warn(`${where}: ${field} has no {link}, so people will not be able to click through to the video.`);
+  }
+  return text;
+}
+
 // Turns the raw channels.json list into checked, tidy entries. Any mistake stops startup with a clear message.
 function loadChannels() {
   const list = readChannelsFile();
@@ -87,23 +108,15 @@ function loadChannels() {
       }
     }
 
-    // The message can be one string or a list of lines (easier to read in JSON).
-    const message = (Array.isArray(entry.message) ? entry.message.join('\n') : String(entry.message || '')).trim();
+    const message = parseTemplate(entry.message, where, 'message', pingRole);
     if (!message) {
       throw new Error(`${where}: message is required. It can be a string or a list of lines.`);
     }
 
-    for (const placeholder of message.match(/\{\w+\}/g) || []) {
-      if (!KNOWN_PLACEHOLDERS.includes(placeholder)) {
-        log.warn(`${where}: "${placeholder}" is not a known placeholder and will be posted as-is. Known: ${KNOWN_PLACEHOLDERS.join(' ')}`);
-      }
-    }
-    if (message.includes('{role}') && !pingRole) {
-      log.warn(`${where}: the message uses {role} but no pingRole is set, so it will be blank.`);
-    }
-    if (!message.includes('{link}')) {
-      log.warn(`${where}: the message has no {link}, so people will not be able to click through to the video.`);
-    }
+    // Optional separate message for the moment the channel goes live.
+    // Setting it switches live announcements on, unless announceLives is explicitly false.
+    const liveMessage = parseTemplate(entry.liveMessage, where, 'liveMessage', pingRole);
+    const announceLives = entry.announceLives === undefined ? liveMessage !== '' : entry.announceLives;
 
     return {
       name,
@@ -111,8 +124,9 @@ function loadChannels() {
       discordChannelId,
       pingRole,
       message,
+      liveMessage,
       announceShorts: entry.announceShorts === true,
-      announceLives: entry.announceLives === true,
+      announceLives,
     };
   });
 }

@@ -1,7 +1,7 @@
-// Works out whether a video from the RSS feed is a normal upload, a Short, a live stream,
-// or something scheduled that has not started yet. The feed itself does not say, so we ask
-// YouTube in two cheap ways, with no API key:
-//   1. The watch page's player data carries isLiveContent / isUpcoming flags.
+// Works out whether a video from the RSS feed is a normal upload, a Short, a live stream
+// (upcoming, live right now, or finished), or a premiere that has not started yet.
+// The feed itself does not say, so we ask YouTube in two cheap ways, with no API key:
+//   1. The watch page's player data carries isLiveContent / isLive / isUpcoming flags.
 //   2. youtube.com/shorts/<id> serves the page (200) for a Short and redirects to /watch for anything else.
 // If YouTube changes something and we cannot tell, we answer "unknown" and let the caller decide.
 
@@ -33,7 +33,8 @@ function readJsonObject(text, start) {
   return null;
 }
 
-// Reads the main video's "videoDetails" block from the watch page. Returns null if it is not there.
+// Reads the main video's "videoDetails" block from the watch page, plus the page's isLiveNow flag.
+// Returns null if the details are not there.
 async function fetchVideoDetails(videoId) {
   const res = await fetch(`https://www.youtube.com/watch?v=${videoId}`, {
     headers: HEADERS,
@@ -41,6 +42,7 @@ async function fetchVideoDetails(videoId) {
   });
   if (!res.ok) throw new Error(`watch page returned HTTP ${res.status}`);
   const html = await res.text();
+  const isLiveNow = html.includes('"isLiveNow":true');
 
   const marker = '"videoDetails":';
   let from = 0;
@@ -51,7 +53,7 @@ async function fetchVideoDetails(videoId) {
     if (json) {
       try {
         const details = JSON.parse(json);
-        if (details.videoId === videoId) return details;
+        if (details.videoId === videoId) return { ...details, isLiveNow };
       } catch {
         // not the block we want, keep looking
       }
@@ -77,11 +79,13 @@ async function isShort(videoId) {
 }
 
 // Returns { kind, signals } where kind is one of:
-//   'video'     a normal upload (or a premiere that has started) - announce it
-//   'short'     a YouTube Short
-//   'live'      a live stream: upcoming, live now, or finished
-//   'upcoming'  a scheduled premiere that has not started yet - check again later
-//   'unknown'   YouTube could not be read properly
+//   'video'          a normal upload (or a premiere that has started)
+//   'short'          a YouTube Short
+//   'live-now'       a live stream that is on air right now
+//   'live-upcoming'  a live stream that is scheduled but has not started
+//   'live-ended'     a live stream that has finished
+//   'upcoming'       a scheduled premiere that has not started yet
+//   'unknown'        YouTube could not be read properly
 // "signals" is a short text of what was seen, for logs.
 async function classifyVideo(videoId) {
   const signals = [];
@@ -89,11 +93,21 @@ async function classifyVideo(videoId) {
   let details = null;
   try {
     details = await fetchVideoDetails(videoId);
-    signals.push(details ? `live=${details.isLiveContent === true} upcoming=${details.isUpcoming === true} length=${details.lengthSeconds}s` : 'no videoDetails on page');
+    signals.push(
+      details
+        ? `stream=${details.isLiveContent === true} liveNow=${details.isLive === true || details.isLiveNow} upcoming=${details.isUpcoming === true} length=${details.lengthSeconds}s`
+        : 'no videoDetails on page'
+    );
   } catch (err) {
     signals.push(`watch page failed: ${err.message}`);
   }
-  if (details && details.isLiveContent === true) return { kind: 'live', signals: signals.join('; ') };
+
+  if (details && details.isLiveContent === true) {
+    let kind = 'live-ended';
+    if (details.isUpcoming === true) kind = 'live-upcoming';
+    else if (details.isLive === true || details.isLiveNow) kind = 'live-now';
+    return { kind, signals: signals.join('; ') };
+  }
   if (details && details.isUpcoming === true) return { kind: 'upcoming', signals: signals.join('; ') };
 
   let short = null;

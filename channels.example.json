@@ -1,15 +1,18 @@
 [
   {
-    "name": "Example channel with a role ping",
+    "name": "Example channel with a role ping and a going-live message",
     "youtubeChannelId": "UCXuqSBlHAE6Xw-yeJA0Tunw",
     "discordChannelId": "123456789012345678",
     "pingRole": "123456789012345678",
     "announceShorts": false,
-    "announceLives": false,
     "message": [
       "Hey {role},",
       "{channel} just posted a video! Go check it out.",
       "",
+      "{link}"
+    ],
+    "liveMessage": [
+      "{role} {channel} is **LIVE**!",
       "{link}"
     ]
   },

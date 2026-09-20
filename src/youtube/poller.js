@@ -6,14 +6,17 @@ const storage = require('../storage');
 const { fetchLatestVideos } = require('./feed');
 const { classifyVideo } = require('./classify');
 
-// If more than this many "new" videos show up for one channel in one check, something is off
-// (feed hiccup, YouTube reordering). Announce only the newest few instead of spamming.
+// If more than this many announcements are due for one channel in one check, something is off
+// (feed hiccup, YouTube reordering). Post only the newest few instead of spamming.
 const MAX_ANNOUNCE_PER_CHECK = 3;
 
 // When YouTube cannot be read to tell what a video is, retry on the next checks before giving up
 // and announcing it anyway. Counted in memory, so a restart simply starts the count again.
 const MAX_UNKNOWN_ATTEMPTS = 3;
 const unknownAttempts = new Map();
+
+// Videos we are waiting on (scheduled streams and premieres), so the log mentions each one only once.
+const waitingLogged = new Set();
 
 // Turns the pingRole setting into the text to insert for {role} plus the matching allowedMentions,
 // which is what makes Discord actually notify people instead of just showing the text.
@@ -24,11 +27,12 @@ function mentionFor(pingRole) {
   return { text: `<@&${pingRole}>`, allowedMentions: { roles: [pingRole] } };
 }
 
-// Fills the placeholders in a channel's message template.
-function renderMessage(watch, video) {
+// Fills the placeholders in a message template. Only the inserted values are escaped,
+// so markdown written in the template itself (like **bold**) still works.
+function renderMessage(watch, video, template = watch.message) {
   const mention = mentionFor(watch.pingRole);
   // Function replacements, so a "$" in a video title is never treated as a special pattern.
-  const content = watch.message
+  const content = template
     .replaceAll('{role}', () => mention.text)
     .replaceAll('{channel}', () => escapeMarkdown(video.channelName))
     .replaceAll('{title}', () => escapeMarkdown(video.title))
@@ -44,19 +48,40 @@ async function getDiscordChannel(client, discordChannelId) {
   return channel;
 }
 
-// Posts one video using the watch entry's template. Discord turns the link into a preview embed.
-async function announce(client, watch, video) {
+// Posts one video using the given template (the normal message by default).
+// Discord turns the link into a preview embed.
+async function announce(client, watch, video, template = watch.message) {
   const channel = await getDiscordChannel(client, watch.discordChannelId);
-  await channel.send(renderMessage(watch, video));
+  await channel.send(renderMessage(watch, video, template));
 }
 
 // Decides what to do with a new video of the given kind for this watch entry.
-// Returns 'announce', 'skip' (remember it, never post) or 'wait' (look again next check).
+// Returns { action, template } where action is:
+//   'announce'  post it now with the given template
+//   'skip'      remember it and never post it
+//   'wait'      leave it alone and look again next check (it has not started yet)
 function decide(kind, watch) {
-  if (kind === 'upcoming') return 'wait';
-  if (kind === 'short') return watch.announceShorts ? 'announce' : 'skip';
-  if (kind === 'live') return watch.announceLives ? 'announce' : 'skip';
-  return 'announce'; // a normal video, or an unknown one once we have given up trying to tell
+  switch (kind) {
+    case 'upcoming': // a scheduled premiere
+      return { action: 'wait' };
+    case 'short':
+      return watch.announceShorts ? { action: 'announce', template: watch.message } : { action: 'skip' };
+    case 'live-upcoming':
+      return watch.announceLives ? { action: 'wait' } : { action: 'skip' };
+    case 'live-now':
+      return watch.announceLives ? { action: 'announce', template: watch.liveMessage || watch.message } : { action: 'skip' };
+    case 'live-ended': // "we are live" would be wrong for a stream that is already over
+      return { action: 'skip' };
+    default: // a normal video, or an unknown one once we have given up trying to tell
+      return { action: 'announce', template: watch.message };
+  }
+}
+
+function describe(kind) {
+  if (kind === 'short') return 'Short';
+  if (kind === 'live-ended') return 'finished live stream';
+  if (kind === 'live-now' || kind === 'live-upcoming') return 'live stream';
+  return 'video';
 }
 
 // One check of one watched channel. Returns the videos it announced.
@@ -81,16 +106,11 @@ async function checkChannel(client, watch) {
   };
 
   // Oldest first, so if several videos are new they are posted in upload order.
-  let fresh = videos.filter((v) => !known.has(v.id)).reverse();
+  const fresh = videos.filter((v) => !known.has(v.id)).reverse();
   if (fresh.length === 0) return [];
 
-  if (fresh.length > MAX_ANNOUNCE_PER_CHECK) {
-    log.warn(`[${watch.name}] ${fresh.length} new videos in one check; only looking at the newest ${MAX_ANNOUNCE_PER_CHECK}.`);
-    for (const skipped of fresh.slice(0, -MAX_ANNOUNCE_PER_CHECK)) remember(skipped);
-    fresh = fresh.slice(-MAX_ANNOUNCE_PER_CHECK);
-  }
-
-  const announced = [];
+  // Work out what each new video is and what to do with it.
+  let toAnnounce = [];
   for (const video of fresh) {
     const { kind, signals } = await classifyVideo(video.id);
 
@@ -105,25 +125,37 @@ async function checkChannel(client, watch) {
     }
     unknownAttempts.delete(video.id);
 
-    const action = decide(kind, watch);
+    const { action, template } = decide(kind, watch);
     if (action === 'wait') {
-      log.info(`[${watch.name}] "${video.title}" is scheduled and has not started yet. Will check again.`);
+      if (!waitingLogged.has(video.id)) {
+        waitingLogged.add(video.id);
+        log.info(`[${watch.name}] "${video.title}" is scheduled and has not started yet. Will keep checking.`);
+      }
       continue;
     }
+    waitingLogged.delete(video.id);
+
     if (action === 'skip') {
       remember(video);
-      const what = kind === 'short' ? 'Short' : 'live stream';
-      log.info(`[${watch.name}] Skipped ${what} "${video.title}" (${video.id}).`);
+      log.info(`[${watch.name}] Skipped ${describe(kind)} "${video.title}" (${video.id}).`);
       continue;
     }
+    toAnnounce.push({ video, template, kind });
+  }
 
-    await announce(client, watch, video);
+  if (toAnnounce.length > MAX_ANNOUNCE_PER_CHECK) {
+    log.warn(`[${watch.name}] ${toAnnounce.length} announcements due in one check; only posting the newest ${MAX_ANNOUNCE_PER_CHECK}.`);
+    for (const { video } of toAnnounce.slice(0, -MAX_ANNOUNCE_PER_CHECK)) remember(video);
+    toAnnounce = toAnnounce.slice(-MAX_ANNOUNCE_PER_CHECK);
+  }
+
+  for (const { video, template, kind } of toAnnounce) {
+    await announce(client, watch, video, template);
     // Save after every post, so a crash mid-loop can never cause a double announcement.
     remember(video);
-    announced.push(video);
-    log.info(`[${watch.name}] Announced "${video.title}" (${video.id}).`);
+    log.info(`[${watch.name}] Announced ${describe(kind)} "${video.title}" (${video.id}).`);
   }
-  return announced;
+  return toAnnounce.map((item) => item.video);
 }
 
 // Checks every watched channel. A failure on one channel never stops the others.

@@ -8,7 +8,7 @@ A Discord bot that watches one or more YouTube channels and posts a custom messa
 - The first time it sees a channel it remembers the videos that already exist and announces nothing. After that, anything new gets posted.
 - Announced video IDs are saved in `data/state.json`, so restarts never re-announce old videos.
 - Each watched channel has its own Discord channel, optional role ping, and message template.
-- Shorts and live streams are skipped unless you switch them on per channel. Scheduled premieres are announced once they start.
+- Shorts and live streams are skipped unless you switch them on per channel. A channel can have its own "going live" message, posted the moment a stream starts. Scheduled premieres are announced once they start.
 - Discord turns the posted link into a preview with the thumbnail automatically.
 
 ## Commands
@@ -16,7 +16,7 @@ A Discord bot that watches one or more YouTube channels and posts a custom messa
 | Command | What it does |
 |---|---|
 | `/ping` | Checks the bot is online and shows response times. |
-| `/testannounce` | Posts the latest video from a watched channel right now, to test the announcement. Only visible to people with Manage Server. |
+| `/testannounce` | Posts the latest video from a watched channel right now, to test the announcement. The optional `type` previews the "going live" message. Only visible to people with Manage Server. |
 
 ## Running it locally
 
@@ -47,6 +47,10 @@ You should see `Logged in as ...`, the registered commands, a permissions check 
     "{channel} just posted a video! Go check it out.",
     "",
     "{link}"
+  ],
+  "liveMessage": [
+    "{role} {channel} is **LIVE**!",
+    "{link}"
   ]
 }
 ```
@@ -59,9 +63,10 @@ You should see `Logged in as ...`, the registered commands, a permissions check 
 | `pingRole` | no | Role ID to ping, or `everyone` / `here`. Leave out for no ping. |
 | `message` | yes | The message to post, either one string or a list of lines. |
 | `announceShorts` | no | `true` to announce Shorts too. Default `false`. |
-| `announceLives` | no | `true` to announce live streams too. Default `false`. |
+| `liveMessage` | no | Message to post the moment the channel goes live, as one string or a list of lines. Setting it switches live announcements on. |
+| `announceLives` | no | `true` announces live streams with the normal `message` when there is no `liveMessage`. `false` switches live announcements off even if a `liveMessage` is set. |
 
-Placeholders you can use in `message`:
+Placeholders you can use in `message` and `liveMessage`. Markdown you type yourself, like `**bold**`, is kept:
 
 | Placeholder | Becomes |
 |---|---|
@@ -80,7 +85,8 @@ YouTube's feed lists everything a channel publishes, so before posting the bot l
 
 - Normal uploads are announced. A scheduled premiere is announced once it starts.
 - Shorts are skipped unless the entry has `"announceShorts": true`.
-- Live streams (upcoming, live now, or finished) are skipped unless the entry has `"announceLives": true`.
+- Live streams are skipped unless the entry has a `liveMessage` (or `"announceLives": true`). When switched on, a stream is announced once, at the moment it goes live. A scheduled stream waits until it starts, and a stream that has already ended is never announced.
+- A live alert can lag by up to one check interval, and a little longer for unscheduled streams because YouTube's own feed takes a few minutes to list them. Lower `POLL_INTERVAL_MINUTES` in `.env` for faster alerts.
 - If YouTube cannot be read to tell what a video is, the bot retries on the next two checks and then announces it anyway, so a broken check can never silently mute the bot.
 
 ## Channel permissions
